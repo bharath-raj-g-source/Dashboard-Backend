@@ -45,7 +45,7 @@ master_app.add_middleware(
 master_app.include_router(qc_router, prefix="/api/qc", tags=["QC Automation"])
 
 # 2. Include the Dashboard Router (Example path: /api/dashboard/projects)
-master_app.include_router(dashboard_router , prefix="/api" )
+master_app.include_router(dashboard_router )
 
 
 # --- SERVER ---
