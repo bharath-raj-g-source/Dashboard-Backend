@@ -27,7 +27,7 @@
   // This command starts the FastAPI server looking for the 'app' variable in 'api.py'.
   // NOTE: You typed '--hos' in your prompt, I've corrected it to '--host'.
   "postAttachCommand": {
-    "server": "uvicorn api:app --host 0.0.0.0 --port 8000 --reload"
+    "server": "uvicorn main:master_app --host 0.0.0.0 --port 8000 --reload"
   },
   
   // Attributes for port 8000 (FastAPI default)
