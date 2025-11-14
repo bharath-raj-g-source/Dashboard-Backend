@@ -25,7 +25,8 @@ master_app = FastAPI(
 origins = [
     "http://localhost:3000",                 
     "https://pm-aqt9.vercel.app",    
-    "https://pm-aqt9-l1fdp88vu-bharath-raj-g-sources-projects.vercel.app",         
+    "https://pm-aqt9-l1fdp88vu-bharath-raj-g-sources-projects.vercel.app", 
+    "https://pm-aqt9-9dcu9ev9t-bharath-raj-g-sources-projects.vercel.app/"        
     # You can also add the pattern for all vercel subdomains if your deployment URL changes often:
     # "https://*.vercel.app", 
 ]
