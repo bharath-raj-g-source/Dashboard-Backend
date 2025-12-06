@@ -354,6 +354,7 @@ import shutil
 from typing import Optional, List
 from C_data_processing import DataExplorer
 from io import BytesIO
+import json
 
 # --- QC Specific Imports ---
 from qc_checks import (
@@ -381,6 +382,11 @@ from C_data_processing_f1 import (
     generate_summary_sheet,
 )
 
+MOCK_QC_SUMMARY = [
+    {"id": 1, "description": "Period Integrity Check", "action": "Audit", "status": "Completed", "total_issues_flagged": 0},
+    {"id": 2, "description": "Field Completeness Check", "action": "Audit", "status": "Issue Found", "total_issues_flagged": 15},
+    # ... rest of your mock data
+]
 # -------------------- ⚙️ Folder setup --------------------
 BASE_DIR = os.getcwd()
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
@@ -535,12 +541,45 @@ async def run_qc_checks(
         color_excel(output_path, df)
         generate_summary_sheet(output_path, df)
 
+        # 💡 Extract the Summary Data (MOCK/Real Logic Needed Here)
+        # Since the backend usually generates this summary table, we need to extract it.
+        # TEMPORARY MOCK FOR SUMMARY DATA (You would replace this with actual logic):
+        summary_data = [
+    # 🚨 FIX 1: Use a dictionary structure instead of QcSummaryResult()
+                {
+                    "id": 1, 
+                    "description": "Period Integrity Check", 
+                    "action": "Audit", 
+                    "status": "Completed", 
+                    "total_issues_flagged": 0
+                },
+                {
+                    "id": 2, 
+                    "description": "Field Completeness Check", 
+                    "action": "Audit", 
+                    "status": "Issue Found", 
+                    "total_issues_flagged": 15
+                },
+                # ... and so on
+            ]
+
+        # 4. Return JSON Response with Download URL
+        download_url =  f"/api/qc/download_file?filename={output_file}"
+
         # 4. Return FileResponse
-        return FileResponse(
-            path=output_path,
-            filename=output_file,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        # return QcRunResponse(
+        #     status="Success",
+        #     message="QC checks complete. File ready for download.",
+        #     download_url=download_url,
+        #     summaries=summary_data # Return the summary data for the frontend table
+        # )
+
+        return JSONResponse(content={
+            "status": "Success",
+            "message": "QC checks complete. File ready for download.",
+            "download_url": download_url,
+            "summaries": summary_data # List of dictionaries
+        })
 
     except Exception as e:
         print(f"QC Error: {e}")
@@ -556,14 +595,14 @@ async def run_qc_checks(
 
 # -------------------- 🌍 NEW MARKET SPECIFIC CHECK ENDPOINT --------------------
 
-@router.post("/market_check_and_process", response_model=None)
+@router.post("/market_check_and_process") # response_model removed for simplicity
 async def market_check_and_process(
-    bsr_file: UploadFile = File(..., description="BSR file for market-specific checks"),
-    obligation_file: Optional[UploadFile] = File(None, description="F1 Obligation file for broadcaster checks"), 
-    overnight_file: Optional[UploadFile] = File(None, description="Overnight Audience file for upscale/integrity check"),
-    checks: List[str] = Form(..., description="List of selected check keys (e.g., 'remove_andorra')")
+    bsr_file: UploadFile = File(..., description="BSR file for market-specific checks", alias="bsr_file"),
+    obligation_file: Optional[UploadFile] = File(None, description="F1 Obligation file", alias="obligation_file"), 
+    overnight_file: Optional[UploadFile] = File(None, description="Overnight Audience file", alias="overnight_file"),
+    # 🚨 FIX 1: Set type hint to STR to correctly receive the JSON string from JSON.stringify()
+    checks: str = Form(..., alias="checks", description="JSON list of check keys to run")
 ):
-    # ... (Market check logic remains the same, but using the paths) ...
     
     bsr_file_path = os.path.join(UPLOAD_FOLDER, bsr_file.filename)
     obligation_path = None
@@ -572,7 +611,23 @@ async def market_check_and_process(
     output_filename = f"Processed_BSR_{os.path.splitext(bsr_file.filename)[0]}_{int(time.time())}.xlsx"
     output_path = os.path.join(OUTPUT_FOLDER, output_filename)
     
+    # 🚨 FIX 2: Explicitly parse the JSON string immediately
     try:
+        # Convert the incoming JSON string into a Python list
+        checks_list_to_process: List[str] = json.loads(checks)
+    except Exception as e:
+        # Handle if the input was not a valid JSON array string
+        raise HTTPException(status_code=400, detail=f"Invalid check list format: Expected JSON string, got {type(checks)}. Error: {e}")
+    
+    # 🚨 FIX 3: Check if the list is empty after parsing
+    if not checks_list_to_process:
+        raise HTTPException(status_code=400, detail="No checks were selected or passed.")
+    
+    # 🚨 DEBUGGING: This print statement shows the correctly parsed list
+    print(f"Final checks list passed to validator: {checks_list_to_process}")
+
+    try:
+        # 1. Save Files
         with open(bsr_file_path, "wb") as buffer: shutil.copyfileobj(bsr_file.file, buffer)
         if obligation_file and obligation_file.filename:
             obligation_path = os.path.join(UPLOAD_FOLDER, obligation_file.filename)
@@ -581,38 +636,50 @@ async def market_check_and_process(
             overnight_path = os.path.join(UPLOAD_FOLDER, overnight_file.filename)
             with open(overnight_path, "wb") as buffer: shutil.copyfileobj(overnight_file.file, buffer)
 
+        # 2. Instantiate and Run Validator
+        # Assuming BSRValidator is accessible
         validator = BSRValidator(
             bsr_path=bsr_file_path, 
             obligation_path=obligation_path, 
             overnight_path=overnight_path 
         ) 
-        status_summaries = validator.market_check_processor(checks)
+        
+        # 3. Call the processor with the correctly parsed list
+        # This list is guaranteed to be ['duration_limits', ...]
+        status_summaries = validator.market_check_processor(checks_list_to_process)
         df_processed = validator.df
         
+        # 4. Finalize Output
         clean_summaries = [s for s in status_summaries if isinstance(s, dict)]
         if df_processed.empty: raise Exception("Processed DataFrame is empty after applying checks.")
 
         df_processed.to_excel(output_path, index=False)
-        download_url = f"/api/download_file?filename={output_filename}" 
+        
+        # 5. Return Final JSON Response
+        download_url = f"/api/qc/download_file?filename={output_filename}" 
 
         return JSONResponse(content={
             "status": "Success",
-            "message": f"Successfully applied {len(checks)} market checks. Processed file is ready for download.",
+            "message": f"Successfully applied {len(checks_list_to_process)} market checks. Processed file is ready for download.",
             "download_url": download_url,
             "summaries": clean_summaries
         })
 
     except Exception as e:
         print(f"Market Check Error: {e}")
+        # Clean up files on error
+        for path in [bsr_file_path, obligation_path, overnight_path]:
+            if path and os.path.exists(path): os.remove(path)
+            
         raise HTTPException(status_code=500, detail=f"An error occurred during market checks: {str(e)}")
     finally:
-        await bsr_file.close()
-        if obligation_file: await obligation_file.close()
-        if overnight_file: await overnight_file.close()
+        # Close file streams and clean up disk files
+        if 'bsr_file' in locals() and bsr_file: await bsr_file.close()
+        if 'obligation_file' in locals() and obligation_file: await obligation_file.close()
+        if 'overnight_file' in locals() and overnight_file: await overnight_file.close()
             
         for path in [bsr_file_path, obligation_path, overnight_path]:
             if path and os.path.exists(path): os.remove(path)
-
 
 # -------------------- 📥 DOWNLOAD ENDPOINT --------------------
 # 💡 NOTE: This endpoint needs to remain outside of the /qc prefix if its called as /api/download_file.
